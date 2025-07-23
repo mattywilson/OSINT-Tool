@@ -2,7 +2,7 @@
 
 Install Python from python.org (Python 3.7+)
 
-Navigate to this directory within CMD
+Navigate to this directory you have saved this within CMD
 
 Install the required library: pip install requests
 
