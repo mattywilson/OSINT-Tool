@@ -1,6 +1,6 @@
 # CMD-OSINT-Tool
 
-Install Python from python.org (Python 3.7+)
+Install Python from python.org (Make sure you tick "Add Python to Enviroment Variables")
 
 Navigate to this directory you have saved this within CMD
 
