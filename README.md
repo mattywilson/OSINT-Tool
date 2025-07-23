@@ -6,7 +6,7 @@ Navigate to this directory you have saved this within CMD
 
 Install the required library: pip install requests
 
-Run the program once via CMD with an IP (python OSINT_Toolkit.py 47.245.61.75:53)
+Run the program once via CMD with an IP (python OSINT_Toolkit.py 8.8.8.8)
 
 This will spit out an error and then provide a config.json file
 
