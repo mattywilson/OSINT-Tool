@@ -22,5 +22,5 @@ ThreatFox: https://auth.abuse.ch/
 
 AlienVault: https://otx.alienvault.com/api
 
-Re-run this again and this will spit out a result into the CMD console.
+Re-run this again and this will provide results for the provided IP/Hash/Domain.
 
