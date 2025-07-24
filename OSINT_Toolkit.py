@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SOC Threat Intelligence Aggregator
-A tool to query multiple threat intelligence APIs and provide structured results
+SOC OSINT Tool
+A tool to query multiple threat intelligence APIs and provide a copy and pasteable result
 """
 
 import requests
