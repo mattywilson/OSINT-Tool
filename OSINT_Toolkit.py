@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SOC OSINT Tool
-A tool to query multiple threat intelligence APIs and provide a copy and pasteable result
+A tool to query multiple threat intelligence APIs and provide structured results
 """
 
 import requests
@@ -16,7 +16,7 @@ import re
 
 class ThreatIntelAggregator:
     def __init__(self, config_file: str = "config.json"):
-        """Initialize the aggregator with API keys from config file"""
+        """Initialise the aggregator with API keys from config file"""
         self.config = self.load_config(config_file)
         self.results = {}
         
@@ -355,14 +355,14 @@ class ThreatIntelAggregator:
             **vpn_results
         }
     
-    def analyze_indicator(self, indicator: str) -> Dict[str, Any]:
-        """Analyze indicator across all configured threat intelligence sources"""
+    def analyse_indicator(self, indicator: str) -> Dict[str, Any]:
+        """Analyse indicator across all configured threat intelligence sources"""
         indicator_type = self.detect_indicator_type(indicator)
         
         if indicator_type == 'unknown':
             return {"error": "Unable to determine indicator type"}
         
-        print(f"Analyzing {indicator_type.upper()}: {indicator}")
+        print(f"Analysing {indicator_type.upper()}: {indicator}")
         
         results = {
             "indicator": indicator,
@@ -530,17 +530,17 @@ class ThreatIntelAggregator:
 
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
-    parser.add_argument('indicator', help='IP address, domain, or file hash to analyze')
+    parser.add_argument('indicator', help='IP address, domain, or file hash to analyse')
     parser.add_argument('-o', '--output', help='Output results to JSON file')
     parser.add_argument('-c', '--config', default='config.json', help='Configuration file path')
     
     args = parser.parse_args()
     
-    # Initialize aggregator
+    # Initialise aggregator
     aggregator = ThreatIntelAggregator(args.config)
     
-    # Analyze indicator
-    results = aggregator.analyze_indicator(args.indicator)
+    # Analyse indicator
+    results = aggregator.analyse_indicator(args.indicator)
     
     # Print results
     aggregator.print_results(results)
