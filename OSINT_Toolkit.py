@@ -39,7 +39,8 @@ class ThreatIntelAggregator:
             "virustotal_api_key": "YOUR_VT_API_KEY_HERE",
             "abuseipdb_api_key": "YOUR_ABUSEIPDB_API_KEY_HERE",
             "threatfox_api_key": "YOUR_THREATFOX_API_KEY_HERE",
-            "alienvault_api_key": "YOUR_ALIENVAULT_API_KEY_HERE"
+            "alienvault_api_key": "YOUR_ALIENVAULT_API_KEY_HERE",
+            "vpnapi_key": "YOUR_VPNAPI_KEY_HERE_OPTIONAL"
         }
         with open(config_file, 'w') as f:
             json.dump(template, f, indent=4)
@@ -104,6 +105,82 @@ class ThreatIntelAggregator:
                 
         except requests.exceptions.RequestException as e:
             return {"error": f"Request failed: {str(e)}"}
+    
+    def check_vpn_status(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
+        """Check if IP is associated with VPN/Proxy services using multiple methods"""
+        if indicator_type != 'ip':
+            return {"error": "VPN check only supports IP addresses"}
+        
+        vpn_results = {
+            "is_vpn": False,
+            "is_proxy": False,
+            "is_tor": False,
+            "vpn_provider": None,
+            "confidence": "low",
+            "sources_checked": []
+        }
+        
+        # Method 1: Free IP2Location check (no API key needed)
+        try:
+            response = requests.get(f'https://api.ip2location.io/{indicator}?key=demo', timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                is_proxy = data.get('is_proxy', False)
+                if is_proxy:
+                    vpn_results["is_proxy"] = True
+                    vpn_results["confidence"] = "medium"
+                vpn_results["sources_checked"].append("IP2Location")
+        except:
+            pass
+        
+        # Method 2: IPQualityScore free tier (if API key provided)
+        if self.config.get('vpnapi_key') and self.config['vpnapi_key'] != 'YOUR_VPNAPI_KEY_HERE_OPTIONAL':
+            try:
+                url = f"https://ipqualityscore.com/api/json/ip/{self.config['vpnapi_key']}/{indicator}"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('vpn'):
+                        vpn_results["is_vpn"] = True
+                        vpn_results["confidence"] = "high"
+                    if data.get('proxy'):
+                        vpn_results["is_proxy"] = True
+                        vpn_results["confidence"] = "high"
+                    if data.get('tor'):
+                        vpn_results["is_tor"] = True
+                        vpn_results["confidence"] = "high"
+                    vpn_results["sources_checked"].append("IPQualityScore")
+            except:
+                pass
+        
+        # Method 3: Check against known VPN/hosting provider patterns from AbuseIPDB data
+        abuse_data = self.query_abuseipdb(indicator, indicator_type)
+        if abuse_data.get("status") == "success":
+            usage_type = abuse_data.get("usage_type", "").lower()
+            isp = abuse_data.get("isp", "").lower()
+            
+            # Common VPN/hosting indicators
+            vpn_keywords = ['vpn', 'proxy', 'hosting', 'cloud', 'datacenter', 'server', 'virtual']
+            hosting_providers = ['amazon', 'google', 'microsoft', 'digitalocean', 'linode', 'ovh']
+            
+            if any(keyword in usage_type for keyword in vpn_keywords):
+                vpn_results["is_vpn"] = True
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                if vpn_results["confidence"] == "low":
+                    vpn_results["confidence"] = "medium"
+            
+            if any(provider in isp for provider in hosting_providers):
+                vpn_results["is_proxy"] = True
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                if vpn_results["confidence"] == "low":
+                    vpn_results["confidence"] = "medium"
+            
+            vpn_results["sources_checked"].append("AbuseIPDB_Analysis")
+        
+        return {
+            "status": "success",
+            **vpn_results
+        }
     
     def query_abuseipdb(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Query AbuseIPDB API"""
@@ -260,7 +337,6 @@ class ThreatIntelAggregator:
             return {"error": "Unable to determine indicator type"}
         
         print(f"Analyzing {indicator_type.upper()}: {indicator}")
-        print("=" * 60)
         
         results = {
             "indicator": indicator,
@@ -277,6 +353,10 @@ class ThreatIntelAggregator:
             ("AlienVault OTX", self.query_alienvault_otx)
         ]
         
+        # Add VPN check for IP addresses
+        if indicator_type == 'ip':
+            sources.append(("VPN_Check", self.check_vpn_status))
+        
         for source_name, query_func in sources:
             print(f"Querying {source_name}...")
             try:
@@ -289,32 +369,24 @@ class ThreatIntelAggregator:
         return results
     
     def print_results(self, results: Dict[str, Any]):
-        """Print ticket-friendly formatted results"""
-        print("\n" + "=" * 60)
-        print("THREAT INTELLIGENCE ANALYSIS")
-        print("=" * 60)
-        print(f"Indicator: {results['indicator']}")
-        print(f"Type: {results['indicator_type'].upper()}")
+        """Print minimalistic ticket-friendly formatted results"""
+        print(f"\nIndicator: {results['indicator']} ({results['indicator_type'].upper()})")
         print(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        print("-" * 60)
         
         # Summary first for quick reference
         self._print_summary(results)
         
-        print("\nDETAILED RESULTS:")
-        print("-" * 20)
+        print("\nSource Results:")
         
         for source, data in results["sources"].items():
             if "error" in data:
-                print(f"{source}: ERROR - {data['error']}")
+                print(f"  {source}: ERROR - {data['error']}")
             elif data.get("status") == "not_found":
-                print(f"{source}: Not found in database")
+                print(f"  {source}: Not found")
             elif data.get("status") == "success":
                 self._print_source_details_simple(source, data)
             else:
-                print(f"{source}: Unknown response")
-        
-        print("\n" + "=" * 60)
+                print(f"  {source}: Unknown response")
     
     def _print_source_details_simple(self, source: str, data: Dict[str, Any]):
         """Print simple, ticket-friendly results for each source"""
@@ -323,18 +395,18 @@ class ThreatIntelAggregator:
             total_engines = sum([data.get('malicious', 0), data.get('suspicious', 0), 
                                data.get('harmless', 0), data.get('undetected', 0)])
             if malicious > 0:
-                print(f"VirusTotal: MALICIOUS - {malicious}/{total_engines} engines detected threats")
+                print(f"  VirusTotal: MALICIOUS - {malicious}/{total_engines} engines detected threats")
             else:
-                print(f"VirusTotal: Clean - {total_engines} engines scanned, no threats detected")
+                print(f"  VirusTotal: Clean - {total_engines} engines scanned")
         
         elif source == "AbuseIPDB":
             confidence = data.get('abuse_confidence', 0)
             reports = data.get('total_reports', 0)
             country = data.get('country_code', 'Unknown')
             if confidence > 25:
-                print(f"AbuseIPDB: SUSPICIOUS - {confidence}% abuse confidence, {reports} reports, Country: {country}")
+                print(f"  AbuseIPDB: SUSPICIOUS - {confidence}% abuse confidence, {reports} reports, {country}")
             else:
-                print(f"AbuseIPDB: Clean - {confidence}% abuse confidence, {reports} reports, Country: {country}")
+                print(f"  AbuseIPDB: Clean - {confidence}% abuse confidence, {reports} reports, {country}")
         
         elif source == "ThreatFox":
             ioc_found = data.get('ioc_found', 'N/A')
@@ -342,16 +414,34 @@ class ThreatIntelAggregator:
             threat_type = data.get('threat_type', 'N/A')
             confidence = data.get('confidence_level', 'N/A')
             if ioc_found != 'N/A':
-                print(f"ThreatFox: Found - IOC: {ioc_found}, Malware: {malware}, Type: {threat_type}, Confidence: {confidence}")
+                print(f"  ThreatFox: Found - IOC: {ioc_found}, Malware: {malware}, Type: {threat_type}")
             else:
-                print(f"ThreatFox: Found - Malware: {malware}, Type: {threat_type}, Confidence: {confidence}")
+                print(f"  ThreatFox: Found - Malware: {malware}, Type: {threat_type}")
         
         elif source == "AlienVault OTX":
             pulse_count = data.get('pulse_count', 0)
             if pulse_count > 0:
-                print(f"AlienVault OTX: Found in {pulse_count} threat pulse(s)")
+                print(f"  AlienVault OTX: Found in {pulse_count} threat pulse(s)")
             else:
-                print(f"AlienVault OTX: Not found in any threat pulses")
+                print(f"  AlienVault OTX: Clean")
+        
+        elif source == "VPN_Check":
+            is_vpn = data.get('is_vpn', False)
+            is_proxy = data.get('is_proxy', False) 
+            is_tor = data.get('is_tor', False)
+            confidence = data.get('confidence', 'low')
+            provider = data.get('vpn_provider', '')
+            
+            if is_tor:
+                print(f"  VPN Check: TOR EXIT NODE detected ({confidence} confidence)")
+            elif is_vpn:
+                provider_text = f" - {provider}" if provider else ""
+                print(f"  VPN Check: VPN detected ({confidence} confidence){provider_text}")
+            elif is_proxy:
+                provider_text = f" - {provider}" if provider else ""
+                print(f"  VPN Check: PROXY/HOSTING detected ({confidence} confidence){provider_text}")
+            else:
+                print(f"  VPN Check: No VPN/Proxy detected")
     
     def _print_summary(self, results: Dict[str, Any]):
         """Print concise analysis summary for tickets"""
@@ -392,14 +482,26 @@ class ThreatIntelAggregator:
                 risk_level = "MEDIUM"
             threats_found.append(f"Found in {otx_data['pulse_count']} threat intelligence pulse(s)")
         
-        print(f"RISK ASSESSMENT: {risk_level}")
+        # Check VPN status
+        vpn_data = results["sources"].get("VPN_Check", {})
+        if vpn_data.get("status") == "success":
+            if vpn_data.get("is_tor"):
+                threats_found.append("TOR exit node detected")
+                if risk_level == "LOW":
+                    risk_level = "MEDIUM"
+            elif vpn_data.get("is_vpn") or vpn_data.get("is_proxy"):
+                vpn_type = "VPN" if vpn_data.get("is_vpn") else "Proxy/Hosting"
+                provider = vpn_data.get("vpn_provider", "Unknown provider")
+                threats_found.append(f"{vpn_type} service detected ({provider})")
+        
+        print(f"\nRisk Assessment: {risk_level}")
         
         if threats_found:
-            print("THREATS IDENTIFIED:")
+            print("Threats Identified:")
             for threat in threats_found:
-                print(f"- {threat}")
+                print(f"  - {threat}")
         else:
-            print("RESULT: No significant threats detected across all sources")
+            print("Result: No significant threats detected")
 
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
@@ -422,7 +524,7 @@ def main():
     if args.output:
         with open(args.output, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"\n💾 Results saved to {args.output}")
+        print(f"\nResults saved to {args.output}")
 
 if __name__ == "__main__":
     main()
