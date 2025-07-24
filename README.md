@@ -1,4 +1,4 @@
-# CMD-OSINT-Tool
+# OSINT-Tool
 
 Install Python from python.org (Make sure you tick "Add Python to Enviroment Variables")
 
