@@ -22,5 +22,7 @@ ThreatFox: https://auth.abuse.ch/
 
 AlienVault: https://otx.alienvault.com/api
 
+IPQualityScore: https://www.ipqualityscore.com/user/api-keys
+
 Re-run this again and this will provide results for the provided IP/Hash/Domain.
 
