@@ -50,32 +50,55 @@ class ThreatIntelAggregator:
     def detect_indicator_type(self, indicator: str) -> str:
         """Detect if indicator is IP, domain, or hash"""
         # Hash patterns
-        if re.match(r'^[a-fA-F0-9]{32}$', indicator):
+        md5_pattern = r'^[a-fA-F0-9]{32}$'
+        sha1_pattern = r'^[a-fA-F0-9]{40}$'
+        sha256_pattern = r'^[a-fA-F0-9]{64}$'
+        
+        if re.match(md5_pattern, indicator):
             return 'md5'
-        elif re.match(r'^[a-fA-F0-9]{40}$', indicator):
+        elif re.match(sha1_pattern, indicator):
             return 'sha1'
-        elif re.match(r'^[a-fA-F0-9]{64}$', indicator):
+        elif re.match(sha256_pattern, indicator):
             return 'sha256'
         
-        # IP pattern
-        if re.match(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', indicator):
-            return 'ip'
+        # IPv4 pattern
+        ipv4_pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
+        if re.match(ipv4_pattern, indicator):
+            return 'ipv4'
         
-        # Domain pattern (basic)
-        if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$', indicator):
+        # IPv6 patterns
+        ipv6_full = r'^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$'
+        ipv6_loopback = r'^::1$'
+        ipv6_zero = r'^::$'
+        ipv6_compressed1 = r'^([0-9a-fA-F]{1,4}:)*::([0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}$'
+        ipv6_compressed2 = r'^([0-9a-fA-F]{1,4}:)*::[0-9a-fA-F]{1,4}$'
+        ipv6_compressed3 = r'^([0-9a-fA-F]{1,4}:)+::$'
+        
+        ipv6_patterns = [ipv6_full, ipv6_loopback, ipv6_zero, ipv6_compressed1, ipv6_compressed2, ipv6_compressed3]
+        
+        for pattern in ipv6_patterns:
+            if re.match(pattern, indicator):
+                return 'ipv6'
+        
+        # Domain pattern
+        domain_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+        if re.match(domain_pattern, indicator):
             return 'domain'
         
         return 'unknown'
     
     def query_virustotal(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Query VirusTotal API"""
-        if not self.config.get('virustotal_api_key') or self.config['virustotal_api_key'] == 'YOUR_VT_API_KEY_HERE':
+        vt_key = self.config.get('virustotal_api_key')
+        if not vt_key or vt_key == 'YOUR_VT_API_KEY_HERE':
             return {"error": "VirusTotal API key not configured"}
         
-        headers = {"x-apikey": self.config['virustotal_api_key']}
+        headers = {"x-apikey": vt_key}
         
         try:
-            if indicator_type == 'ip':
+            if indicator_type == 'ipv4':
+                url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
+            elif indicator_type == 'ipv6':
                 url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
             elif indicator_type == 'domain':
                 url = f"https://www.virustotal.com/api/v3/domains/{indicator}"
@@ -106,92 +129,17 @@ class ThreatIntelAggregator:
         except requests.exceptions.RequestException as e:
             return {"error": f"Request failed: {str(e)}"}
     
-    def check_vpn_status(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Check if IP is associated with VPN/Proxy services using multiple methods"""
-        if indicator_type != 'ip':
-            return {"error": "VPN check only supports IP addresses"}
-        
-        vpn_results = {
-            "is_vpn": False,
-            "is_proxy": False,
-            "is_tor": False,
-            "vpn_provider": None,
-            "confidence": "low",
-            "sources_checked": []
-        }
-        
-        # Method 1: Free IP2Location check (no API key needed)
-        try:
-            response = requests.get(f'https://api.ip2location.io/{indicator}?key=demo', timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                is_proxy = data.get('is_proxy', False)
-                if is_proxy:
-                    vpn_results["is_proxy"] = True
-                    vpn_results["confidence"] = "medium"
-                vpn_results["sources_checked"].append("IP2Location")
-        except:
-            pass
-        
-        # Method 2: IPQualityScore free tier (if API key provided)
-        if self.config.get('vpnapi_key') and self.config['vpnapi_key'] != 'YOUR_VPNAPI_KEY_HERE_OPTIONAL':
-            try:
-                url = f"https://ipqualityscore.com/api/json/ip/{self.config['vpnapi_key']}/{indicator}"
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('vpn'):
-                        vpn_results["is_vpn"] = True
-                        vpn_results["confidence"] = "high"
-                    if data.get('proxy'):
-                        vpn_results["is_proxy"] = True
-                        vpn_results["confidence"] = "high"
-                    if data.get('tor'):
-                        vpn_results["is_tor"] = True
-                        vpn_results["confidence"] = "high"
-                    vpn_results["sources_checked"].append("IPQualityScore")
-            except:
-                pass
-        
-        # Method 3: Check against known VPN/hosting provider patterns from AbuseIPDB data
-        abuse_data = self.query_abuseipdb(indicator, indicator_type)
-        if abuse_data.get("status") == "success":
-            usage_type = abuse_data.get("usage_type", "").lower()
-            isp = abuse_data.get("isp", "").lower()
-            
-            # Common VPN/hosting indicators
-            vpn_keywords = ['vpn', 'proxy', 'hosting', 'cloud', 'datacenter', 'server', 'virtual']
-            hosting_providers = ['amazon', 'google', 'microsoft', 'digitalocean', 'linode', 'ovh']
-            
-            if any(keyword in usage_type for keyword in vpn_keywords):
-                vpn_results["is_vpn"] = True
-                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
-                if vpn_results["confidence"] == "low":
-                    vpn_results["confidence"] = "medium"
-            
-            if any(provider in isp for provider in hosting_providers):
-                vpn_results["is_proxy"] = True
-                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
-                if vpn_results["confidence"] == "low":
-                    vpn_results["confidence"] = "medium"
-            
-            vpn_results["sources_checked"].append("AbuseIPDB_Analysis")
-        
-        return {
-            "status": "success",
-            **vpn_results
-        }
-    
     def query_abuseipdb(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Query AbuseIPDB API"""
-        if indicator_type != 'ip':
+        if indicator_type not in ['ipv4', 'ipv6']:
             return {"error": "AbuseIPDB only supports IP addresses"}
         
-        if not self.config.get('abuseipdb_api_key') or self.config['abuseipdb_api_key'] == 'YOUR_ABUSEIPDB_API_KEY_HERE':
+        abuse_key = self.config.get('abuseipdb_api_key')
+        if not abuse_key or abuse_key == 'YOUR_ABUSEIPDB_API_KEY_HERE':
             return {"error": "AbuseIPDB API key not configured"}
         
         headers = {
-            'Key': self.config['abuseipdb_api_key'],
+            'Key': abuse_key,
             'Accept': 'application/json'
         }
         
@@ -226,18 +174,19 @@ class ThreatIntelAggregator:
     
     def query_threatfox(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Query ThreatFox API"""
-        if not self.config.get('threatfox_api_key') or self.config['threatfox_api_key'] == 'YOUR_THREATFOX_API_KEY_HERE':
+        tf_key = self.config.get('threatfox_api_key')
+        if not tf_key or tf_key == 'YOUR_THREATFOX_API_KEY_HERE':
             return {"error": "ThreatFox API key not configured. Get free key at https://auth.abuse.ch/"}
         
         try:
             data = {
                 "query": "search_ioc",
                 "search_term": indicator,
-                "exact_match": False  # Use wildcard search to find IPs with ports
+                "exact_match": False
             }
             
             headers = {
-                'Auth-Key': self.config['threatfox_api_key'],
+                'Auth-Key': tf_key,
                 'Content-Type': 'application/json'
             }
             
@@ -249,26 +198,22 @@ class ThreatIntelAggregator:
                 if result.get('query_status') == 'ok':
                     iocs = result.get('data', [])
                     if iocs:
-                        # Find the best match - prioritize exact matches, then partial matches
                         best_match = None
                         for ioc in iocs:
                             ioc_value = ioc.get('ioc', '')
-                            # Exact match (for domains/hashes)
                             if ioc_value == indicator:
                                 best_match = ioc
                                 break
-                            # IP with port match (for IPs)
-                            elif indicator_type == 'ip' and ioc_value.startswith(f"{indicator}:"):
+                            elif indicator_type in ['ipv4', 'ipv6'] and ioc_value.startswith(f"{indicator}:"):
                                 best_match = ioc
                                 break
-                            # Partial match as fallback
                             elif indicator in ioc_value and not best_match:
                                 best_match = ioc
                         
                         if best_match:
                             return {
                                 "status": "success",
-                                "ioc_found": best_match.get('ioc', indicator),  # Show actual IOC found
+                                "ioc_found": best_match.get('ioc', indicator),
                                 "threat_type": best_match.get('threat_type', 'N/A'),
                                 "malware": best_match.get('malware_printable', best_match.get('malware', 'N/A')),
                                 "confidence_level": best_match.get('confidence_level', 'N/A'),
@@ -297,14 +242,17 @@ class ThreatIntelAggregator:
     
     def query_alienvault_otx(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Query AlienVault OTX API"""
-        if not self.config.get('alienvault_api_key') or self.config['alienvault_api_key'] == 'YOUR_ALIENVAULT_API_KEY_HERE':
+        otx_key = self.config.get('alienvault_api_key')
+        if not otx_key or otx_key == 'YOUR_ALIENVAULT_API_KEY_HERE':
             return {"error": "AlienVault OTX API key not configured"}
         
-        headers = {'X-OTX-API-KEY': self.config['alienvault_api_key']}
+        headers = {'X-OTX-API-KEY': otx_key}
         
         try:
-            if indicator_type == 'ip':
+            if indicator_type == 'ipv4':
                 url = f"https://otx.alienvault.com/api/v1/indicators/IPv4/{indicator}/general"
+            elif indicator_type == 'ipv6':
+                url = f"https://otx.alienvault.com/api/v1/indicators/IPv6/{indicator}/general"
             elif indicator_type == 'domain':
                 url = f"https://otx.alienvault.com/api/v1/indicators/domain/{indicator}/general"
             elif indicator_type in ['md5', 'sha1', 'sha256']:
@@ -328,6 +276,84 @@ class ThreatIntelAggregator:
                 
         except requests.exceptions.RequestException as e:
             return {"error": f"Request failed: {str(e)}"}
+    
+    def check_vpn_status(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
+        """Check if IP is associated with VPN/Proxy services using multiple methods"""
+        if indicator_type not in ['ipv4', 'ipv6']:
+            return {"error": "VPN check only supports IP addresses"}
+        
+        vpn_results = {
+            "is_vpn": False,
+            "is_proxy": False,
+            "is_tor": False,
+            "vpn_provider": None,
+            "confidence": "low",
+            "sources_checked": []
+        }
+        
+        # Method 1: Free IP2Location check (IPv4 only)
+        if indicator_type == 'ipv4':
+            try:
+                url = f'https://api.ip2location.io/{indicator}?key=demo'
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    is_proxy = data.get('is_proxy', False)
+                    if is_proxy:
+                        vpn_results["is_proxy"] = True
+                        vpn_results["confidence"] = "medium"
+                    vpn_results["sources_checked"].append("IP2Location")
+            except:
+                pass
+        
+        # Method 2: IPQualityScore (supports both IPv4 and IPv6)
+        vpn_key = self.config.get('vpnapi_key')
+        if vpn_key and vpn_key != 'YOUR_VPNAPI_KEY_HERE_OPTIONAL':
+            try:
+                url = f"https://ipqualityscore.com/api/json/ip/{vpn_key}/{indicator}"
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('vpn'):
+                        vpn_results["is_vpn"] = True
+                        vpn_results["confidence"] = "high"
+                    if data.get('proxy'):
+                        vpn_results["is_proxy"] = True
+                        vpn_results["confidence"] = "high"
+                    if data.get('tor'):
+                        vpn_results["is_tor"] = True
+                        vpn_results["confidence"] = "high"
+                    vpn_results["sources_checked"].append("IPQualityScore")
+            except:
+                pass
+        
+        # Method 3: Check AbuseIPDB data for hosting patterns
+        abuse_data = self.query_abuseipdb(indicator, indicator_type)
+        if abuse_data.get("status") == "success":
+            usage_type = abuse_data.get("usage_type", "").lower()
+            isp = abuse_data.get("isp", "").lower()
+            
+            vpn_keywords = ['vpn', 'proxy', 'hosting', 'cloud', 'datacenter', 'server', 'virtual']
+            hosting_providers = ['amazon', 'google', 'microsoft', 'digitalocean', 'linode', 'ovh']
+            
+            if any(keyword in usage_type for keyword in vpn_keywords):
+                vpn_results["is_vpn"] = True
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                if vpn_results["confidence"] == "low":
+                    vpn_results["confidence"] = "medium"
+            
+            if any(provider in isp for provider in hosting_providers):
+                vpn_results["is_proxy"] = True
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                if vpn_results["confidence"] == "low":
+                    vpn_results["confidence"] = "medium"
+            
+            vpn_results["sources_checked"].append("AbuseIPDB_Analysis")
+        
+        return {
+            "status": "success",
+            **vpn_results
+        }
     
     def analyze_indicator(self, indicator: str) -> Dict[str, Any]:
         """Analyze indicator across all configured threat intelligence sources"""
@@ -354,7 +380,7 @@ class ThreatIntelAggregator:
         ]
         
         # Add VPN check for IP addresses
-        if indicator_type == 'ip':
+        if indicator_type in ['ipv4', 'ipv6']:
             sources.append(("VPN_Check", self.check_vpn_status))
         
         for source_name, query_func in sources:
@@ -362,7 +388,7 @@ class ThreatIntelAggregator:
             try:
                 result = query_func(indicator, indicator_type)
                 results["sources"][source_name] = result
-                time.sleep(1)  # Rate limiting
+                time.sleep(1)
             except Exception as e:
                 results["sources"][source_name] = {"error": f"Unexpected error: {str(e)}"}
         
@@ -373,7 +399,6 @@ class ThreatIntelAggregator:
         print(f"\nIndicator: {results['indicator']} ({results['indicator_type'].upper()})")
         print(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
         
-        # Summary first for quick reference
         self._print_summary(results)
         
         print("\nSource Results:")
