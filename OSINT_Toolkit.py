@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SOC Threat Intelligence Aggregator
-A tool to query multiple threat intelligence APIs and provide structured results
+SOC OSINT Tool
+A tool to query multiple threat intelligence APIs and provide a copy and pasteable result
 """
 
 import requests
@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import hashlib
 import re
-import urllib.parse
 
 class ThreatIntelAggregator:
     def __init__(self, config_file: str = "config.json"):
@@ -41,14 +40,12 @@ class ThreatIntelAggregator:
             "abuseipdb_api_key": "YOUR_ABUSEIPDB_API_KEY_HERE",
             "threatfox_api_key": "YOUR_THREATFOX_API_KEY_HERE",
             "alienvault_api_key": "YOUR_ALIENVAULT_API_KEY_HERE",
-            "vpnapi_key": "YOUR_VPNAPI_KEY_HERE_OPTIONAL",
-            "spur_api_key": "YOUR_SPUR_API_KEY_HERE_OPTIONAL"
+            "vpnapi_key": "YOUR_VPNAPI_KEY_HERE_OPTIONAL"
         }
         with open(config_file, 'w') as f:
             json.dump(template, f, indent=4)
         print(f"Template configuration created: {config_file}")
         print("Please add your API keys and run again.")
-        print("SPUR.US API key can be obtained from: https://spur.us/app/anonymous")
     
     def detect_indicator_type(self, indicator: str) -> str:
         """Detect if indicator is IP, domain, or hash"""
@@ -126,8 +123,6 @@ class ThreatIntelAggregator:
                 }
             elif response.status_code == 404:
                 return {"status": "not_found", "message": "Indicator not found in VirusTotal"}
-            elif response.status_code == 429:
-                return {"error": "Rate limit exceeded for VirusTotal API"}
             else:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
@@ -171,8 +166,6 @@ class ThreatIntelAggregator:
                     "total_reports": data.get('totalReports', 0),
                     "last_reported": data.get('lastReportedAt', 'N/A')
                 }
-            elif response.status_code == 429:
-                return {"error": "Rate limit exceeded for AbuseIPDB API"}
             else:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
@@ -239,8 +232,6 @@ class ThreatIntelAggregator:
                     return {"error": f"Query failed: {result.get('query_status')}"}
             elif response.status_code == 401:
                 return {"error": "Invalid ThreatFox API key. Get free key at https://auth.abuse.ch/"}
-            elif response.status_code == 429:
-                return {"error": "Rate limit exceeded for ThreatFox API"}
             else:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
@@ -280,79 +271,6 @@ class ThreatIntelAggregator:
                     "first_seen": data.get('first_seen', 'N/A'),
                     "last_seen": data.get('last_seen', 'N/A')
                 }
-            elif response.status_code == 429:
-                return {"error": "Rate limit exceeded for AlienVault OTX API"}
-            else:
-                return {"error": f"HTTP {response.status_code}: {response.text}"}
-                
-        except requests.exceptions.RequestException as e:
-            return {"error": f"Request failed: {str(e)}"}
-    
-    def query_spur(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Query SPUR.US API for detailed VPN/proxy information"""
-        if indicator_type not in ['ipv4', 'ipv6']:
-            return {"error": "SPUR only supports IP addresses"}
-        
-        spur_key = self.config.get('spur_api_key')
-        if not spur_key or spur_key == 'YOUR_SPUR_API_KEY_HERE_OPTIONAL':
-            return {"error": "SPUR API key not configured. Get key at https://spur.us/app/anonymous"}
-        
-        headers = {
-            'Token': spur_key,
-            'Accept': 'application/json'
-        }
-        
-        try:
-            # URL encode the IP address for safety
-            encoded_ip = urllib.parse.quote(indicator, safe='')
-            url = f"https://api.spur.us/v2/context/{encoded_ip}"
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Extract tunnels information (VPN/proxy services)
-                tunnels = data.get('tunnels', [])
-                vpn_info = {
-                    "operator": "Unknown",
-                    "type": "Unknown",
-                    "anonymous": False
-                }
-                
-                if tunnels:
-                    # Get the first tunnel entry (usually the primary one)
-                    primary_tunnel = tunnels[0]
-                    vpn_info = {
-                        "operator": primary_tunnel.get('operator', 'Unknown'),
-                        "type": primary_tunnel.get('type', 'Unknown'),
-                        "anonymous": primary_tunnel.get('anonymous', False)
-                    }
-                
-                return {
-                    "status": "success",
-                    "is_vpn": len(tunnels) > 0,
-                    "vpn_operator": vpn_info["operator"],
-                    "vpn_type": vpn_info["type"],
-                    "is_anonymous": vpn_info["anonymous"],
-                    "tunnel_count": len(tunnels),
-                    "as_name": data.get('as', {}).get('name', 'N/A'),
-                    "as_number": data.get('as', {}).get('number', 'N/A'),
-                    "organization": data.get('as', {}).get('organization', 'N/A'),
-                    "location": {
-                        "country": data.get('location', {}).get('country', 'N/A'),
-                        "state": data.get('location', {}).get('state', 'N/A'),
-                        "city": data.get('location', {}).get('city', 'N/A')
-                    },
-                    "risks": data.get('risks', []),
-                    "services": data.get('services', [])
-                }
-            elif response.status_code == 404:
-                return {"status": "not_found", "message": "IP not found in SPUR database"}
-            elif response.status_code == 401:
-                return {"error": "Invalid SPUR API key"}
-            elif response.status_code == 429:
-                return {"error": "Rate limit exceeded for SPUR API"}
             else:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
@@ -368,7 +286,7 @@ class ThreatIntelAggregator:
             "is_vpn": False,
             "is_proxy": False,
             "is_tor": False,
-            "vpn_provider": "Unknown",
+            "vpn_provider": None,
             "confidence": "low",
             "sources_checked": []
         }
@@ -389,10 +307,10 @@ class ThreatIntelAggregator:
                 pass
         
         # Method 2: IPQualityScore (supports both IPv4 and IPv6)
-        vpnapi_key = self.config.get('vpnapi_key')
-        if vpnapi_key and vpnapi_key != 'YOUR_VPNAPI_KEY_HERE_OPTIONAL':
+        vpn_key = self.config.get('vpnapi_key')
+        if vpn_key and vpn_key != 'YOUR_VPNAPI_KEY_HERE_OPTIONAL':
             try:
-                url = f"https://ipqualityscore.com/api/json/ip/{vpnapi_key}/{indicator}"
+                url = f"https://ipqualityscore.com/api/json/ip/{vpn_key}/{indicator}"
                 response = requests.get(url, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
@@ -405,12 +323,6 @@ class ThreatIntelAggregator:
                     if data.get('tor'):
                         vpn_results["is_tor"] = True
                         vpn_results["confidence"] = "high"
-                    
-                    # Try to get ISP info as provider
-                    isp = data.get('ISP', '').strip()
-                    if isp:
-                        vpn_results["vpn_provider"] = isp
-                    
                     vpn_results["sources_checked"].append("IPQualityScore")
             except:
                 pass
@@ -426,15 +338,13 @@ class ThreatIntelAggregator:
             
             if any(keyword in usage_type for keyword in vpn_keywords):
                 vpn_results["is_vpn"] = True
-                if vpn_results["vpn_provider"] == "Unknown":
-                    vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
                 if vpn_results["confidence"] == "low":
                     vpn_results["confidence"] = "medium"
             
             if any(provider in isp for provider in hosting_providers):
                 vpn_results["is_proxy"] = True
-                if vpn_results["vpn_provider"] == "Unknown":
-                    vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
+                vpn_results["vpn_provider"] = abuse_data.get("isp", "Unknown")
                 if vpn_results["confidence"] == "low":
                     vpn_results["confidence"] = "medium"
             
@@ -469,19 +379,15 @@ class ThreatIntelAggregator:
             ("AlienVault OTX", self.query_alienvault_otx)
         ]
         
-        # Add IP-specific checks
+        # Add VPN check for IP addresses
         if indicator_type in ['ipv4', 'ipv6']:
-            sources.extend([
-                ("SPUR", self.query_spur),
-                ("VPN_Check", self.check_vpn_status)
-            ])
+            sources.append(("VPN_Check", self.check_vpn_status))
         
         for source_name, query_func in sources:
             print(f"Querying {source_name}...")
             try:
                 result = query_func(indicator, indicator_type)
                 results["sources"][source_name] = result
-                # Add slight delay between requests to be respectful to APIs
                 time.sleep(1)
             except Exception as e:
                 results["sources"][source_name] = {"error": f"Unexpected error: {str(e)}"}
@@ -544,44 +450,21 @@ class ThreatIntelAggregator:
             else:
                 print(f"  AlienVault OTX: Clean")
         
-        elif source == "SPUR":
-            is_vpn = data.get('is_vpn', False)
-            if is_vpn:
-                operator = data.get('vpn_operator', 'Unknown')
-                vpn_type = data.get('vpn_type', 'Unknown')
-                is_anonymous = data.get('is_anonymous', False)
-                anon_text = " (Anonymous)" if is_anonymous else ""
-                print(f"  SPUR: VPN DETECTED - {operator} ({vpn_type}){anon_text}")
-                
-                # Show location if available
-                location = data.get('location', {})
-                if location.get('country', 'N/A') != 'N/A':
-                    loc_parts = [location.get('city', ''), location.get('state', ''), location.get('country', '')]
-                    location_str = ', '.join([part for part in loc_parts if part and part != 'N/A'])
-                    if location_str:
-                        print(f"    Location: {location_str}")
-                
-                # Show risks if any
-                risks = data.get('risks', [])
-                if risks:
-                    print(f"    Risks: {', '.join(risks)}")
-            else:
-                org = data.get('organization', 'Unknown')
-                print(f"  SPUR: No VPN detected - {org}")
-        
         elif source == "VPN_Check":
             is_vpn = data.get('is_vpn', False)
             is_proxy = data.get('is_proxy', False) 
             is_tor = data.get('is_tor', False)
             confidence = data.get('confidence', 'low')
-            provider = data.get('vpn_provider') or "Unknown"
+            provider = data.get('vpn_provider', '')
             
             if is_tor:
                 print(f"  VPN Check: TOR EXIT NODE detected ({confidence} confidence)")
             elif is_vpn:
-                print(f"  VPN Check: VPN detected ({confidence} confidence) - {provider}")
+                provider_text = f" - {provider}" if provider else ""
+                print(f"  VPN Check: VPN detected ({confidence} confidence){provider_text}")
             elif is_proxy:
-                print(f"  VPN Check: PROXY/HOSTING detected ({confidence} confidence) - {provider}")
+                provider_text = f" - {provider}" if provider else ""
+                print(f"  VPN Check: PROXY/HOSTING detected ({confidence} confidence){provider_text}")
             else:
                 print(f"  VPN Check: No VPN/Proxy detected")
     
@@ -624,39 +507,17 @@ class ThreatIntelAggregator:
                 risk_level = "MEDIUM"
             threats_found.append(f"Found in {otx_data['pulse_count']} threat intelligence pulse(s)")
         
-        # Check SPUR for VPN information (priority over generic VPN check)
-        spur_data = results["sources"].get("SPUR", {})
-        if spur_data.get("status") == "success" and spur_data.get("is_vpn"):
-            operator = spur_data.get("vpn_operator", "Unknown")
-            vpn_type = spur_data.get("vpn_type", "VPN")
-            is_anonymous = spur_data.get("is_anonymous", False)
-            
-            if is_anonymous:
-                threats_found.append(f"Anonymous {vpn_type} service detected ({operator})")
+        # Check VPN status
+        vpn_data = results["sources"].get("VPN_Check", {})
+        if vpn_data.get("status") == "success":
+            if vpn_data.get("is_tor"):
+                threats_found.append("TOR exit node detected")
                 if risk_level == "LOW":
                     risk_level = "MEDIUM"
-            else:
-                threats_found.append(f"{vpn_type} service detected ({operator})")
-            
-            # Check for additional risks from SPUR
-            risks = spur_data.get("risks", [])
-            if risks:
-                threats_found.append(f"Additional risks: {', '.join(risks)}")
-                if risk_level == "LOW":
-                    risk_level = "MEDIUM"
-        
-        # Fallback to generic VPN check if SPUR didn't find anything
-        elif not spur_data.get("is_vpn", False):
-            vpn_data = results["sources"].get("VPN_Check", {})
-            if vpn_data.get("status") == "success":
-                if vpn_data.get("is_tor"):
-                    threats_found.append("TOR exit node detected")
-                    if risk_level == "LOW":
-                        risk_level = "MEDIUM"
-                elif vpn_data.get("is_vpn") or vpn_data.get("is_proxy"):
-                    vpn_type = "VPN" if vpn_data.get("is_vpn") else "Proxy/Hosting"
-                    provider = vpn_data.get("vpn_provider") or "Unknown provider"
-                    threats_found.append(f"{vpn_type} service detected ({provider})")
+            elif vpn_data.get("is_vpn") or vpn_data.get("is_proxy"):
+                vpn_type = "VPN" if vpn_data.get("is_vpn") else "Proxy/Hosting"
+                provider = vpn_data.get("vpn_provider", "Unknown provider")
+                threats_found.append(f"{vpn_type} service detected ({provider})")
         
         print(f"\nRisk Assessment: {risk_level}")
         
@@ -672,7 +533,6 @@ def main():
     parser.add_argument('indicator', help='IP address, domain, or file hash to analyze')
     parser.add_argument('-o', '--output', help='Output results to JSON file')
     parser.add_argument('-c', '--config', default='config.json', help='Configuration file path')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     
     args = parser.parse_args()
     
@@ -682,11 +542,6 @@ def main():
     # Analyze indicator
     results = aggregator.analyze_indicator(args.indicator)
     
-    # Handle errors
-    if "error" in results:
-        print(f"Error: {results['error']}")
-        sys.exit(1)
-    
     # Print results
     aggregator.print_results(results)
     
@@ -695,16 +550,6 @@ def main():
         with open(args.output, 'w') as f:
             json.dump(results, f, indent=2)
         print(f"\nResults saved to {args.output}")
-    
-    # Print verbose information if requested
-    if args.verbose:
-        print(f"\nVerbose Information:")
-        print(f"Total sources queried: {len(results['sources'])}")
-        successful_sources = [name for name, data in results['sources'].items() 
-                            if data.get('status') == 'success']
-        print(f"Successful queries: {len(successful_sources)}")
-        if successful_sources:
-            print(f"Sources with data: {', '.join(successful_sources)}")
 
 if __name__ == "__main__":
     main()
