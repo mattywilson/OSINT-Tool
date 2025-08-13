@@ -14,6 +14,8 @@ from typing import Dict, Any, Optional
 import hashlib
 import re
 import os
+import subprocess
+import shutil
 
 class ThreatIntelAggregator:
     def __init__(self, config_file: str = "config.json"):
@@ -529,14 +531,85 @@ class ThreatIntelAggregator:
         else:
             print("Result: No significant threats detected")
 
+def _run_git_command(args: list, cwd: str) -> str:
+    """Run a git command and return stdout, or raise on failure."""
+    completed = subprocess.run([
+        "git",
+        *args
+    ], cwd=cwd, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or f"git {' '.join(args)} failed")
+    return completed.stdout.strip()
+
+
+def maybe_auto_update(disable_update: bool = False):
+    """If in a git repo and remote has newer commits, auto-pull and restart the script.
+    Skips if disabled or already updated once in this process.
+    """
+    if disable_update or os.environ.get("OSINT_TOOLKIT_UPDATED") == "1":
+        return
+    try:
+        # Ensure git is available
+        if not shutil.which("git"):
+            return
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        git_dir = os.path.join(script_dir, ".git")
+        if not os.path.isdir(git_dir):
+            return
+
+        # Identify branch
+        branch = _run_git_command(["rev-parse", "--abbrev-ref", "HEAD"], cwd=script_dir)
+        if branch == "HEAD":
+            # Detached HEAD; try to resolve remote HEAD branch
+            try:
+                branch = _run_git_command(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd=script_dir)
+                if branch.startswith("refs/remotes/origin/"):
+                    branch = branch.split("/")[-1]
+            except Exception:
+                # Fallback to main
+                branch = "main"
+
+        # Fetch latest from origin
+        _run_git_command(["fetch", "origin", branch], cwd=script_dir)
+
+        # Compare commit positions
+        ahead_behind = _run_git_command(["rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"], cwd=script_dir)
+        parts = ahead_behind.split()
+        if len(parts) == 2:
+            ahead_count = int(parts[0])
+            behind_count = int(parts[1])
+        else:
+            ahead_count = behind_count = 0
+
+        if behind_count > 0:
+            print(f"Update available: pulling latest changes from origin/{branch}...")
+            # Attempt fast-forward only to avoid merge commits
+            try:
+                _run_git_command(["pull", "--ff-only", "origin", branch], cwd=script_dir)
+            except Exception:
+                # Fallback to hard reset if necessary
+                _run_git_command(["fetch", "origin", branch], cwd=script_dir)
+                _run_git_command(["reset", "--hard", f"origin/{branch}"], cwd=script_dir)
+            print("Update applied. Restarting with latest code...\n")
+            os.environ["OSINT_TOOLKIT_UPDATED"] = "1"
+            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+    except Exception as e:
+        # Non-fatal; continue running
+        print(f"Update check failed or skipped: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
     parser.add_argument('indicator', nargs='?', help='IP address, domain, or file hash to analyse')
     parser.add_argument('-o', '--output', help='Output results to JSON file (single run), or directory in interactive mode')
     parser.add_argument('-c', '--config', default='config.json', help='Configuration file path')
     parser.add_argument('-i', '--interactive', action='store_true', help='Start in interactive mode')
+    parser.add_argument('--no-update', action='store_true', help='Disable automatic update check at startup')
     
     args = parser.parse_args()
+
+    # Auto-update (non-fatal) before performing any work
+    maybe_auto_update(disable_update=args.no_update)
     
     # Initialise aggregator
     aggregator = ThreatIntelAggregator(args.config)

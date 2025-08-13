@@ -32,3 +32,8 @@ Interactive mode:
 - Then type an IP/Hash/Domain at the `Indicator>` prompt (type `q` to quit)
 - Optional: save each result to JSON by specifying an output directory: `python OSINT_Toolkit.py --interactive --output results/`
 
+Auto-update:
+
+- On startup, if this folder is a Git repository with a remote `origin`, the tool will check for updates on your current branch and pull them automatically, then restart.
+- To disable this behavior, run with `--no-update`.
+
