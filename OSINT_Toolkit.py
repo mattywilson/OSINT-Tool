@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import hashlib
 import re
+import os
 
 class ThreatIntelAggregator:
     def __init__(self, config_file: str = "config.json"):
@@ -530,17 +531,66 @@ class ThreatIntelAggregator:
 
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
-    parser.add_argument('indicator', help='IP address, domain, or file hash to analyse')
-    parser.add_argument('-o', '--output', help='Output results to JSON file')
+    parser.add_argument('indicator', nargs='?', help='IP address, domain, or file hash to analyse')
+    parser.add_argument('-o', '--output', help='Output results to JSON file (single run), or directory in interactive mode')
     parser.add_argument('-c', '--config', default='config.json', help='Configuration file path')
+    parser.add_argument('-i', '--interactive', action='store_true', help='Start in interactive mode')
     
     args = parser.parse_args()
     
     # Initialise aggregator
     aggregator = ThreatIntelAggregator(args.config)
     
+    # Interactive mode if requested or no indicator supplied
+    if args.interactive or not args.indicator:
+        print("\nInteractive mode. Enter an IP, domain, or file hash to analyse. Type 'q' to quit.")
+        if args.output:
+            # Ensure output is treated as a directory in interactive mode
+            if not os.path.isdir(args.output):
+                os.makedirs(args.output, exist_ok=True)
+            print(f"Results will be saved to directory: {args.output}")
+        
+        while True:
+            try:
+                user_input = input("\nIndicator> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
+                break
+            
+            if not user_input:
+                continue
+            if user_input.lower() in ('q', 'quit', 'exit'):
+                break
+            
+            # Analyse indicator
+            results = aggregator.analyse_indicator(user_input)
+            
+            # Handle errors gracefully in interactive mode
+            if isinstance(results, dict) and results.get("error"):
+                print(f"Error: {results['error']}")
+                continue
+            
+            # Print results
+            aggregator.print_results(results)
+            
+            # Save per-indicator if requested
+            if args.output:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                safe_indicator = re.sub(r'[^A-Za-z0-9._-]+', '_', user_input)
+                filepath = os.path.join(args.output, f"{safe_indicator}_{timestamp}.json")
+                with open(filepath, 'w') as f:
+                    json.dump(results, f, indent=2)
+                print(f"\nResults saved to {filepath}")
+        return
+    
+    # One-shot mode
     # Analyse indicator
     results = aggregator.analyse_indicator(args.indicator)
+    
+    # Exit gracefully on error in one-shot mode
+    if isinstance(results, dict) and results.get("error"):
+        print(f"Error: {results['error']}")
+        sys.exit(2)
     
     # Print results
     aggregator.print_results(results)

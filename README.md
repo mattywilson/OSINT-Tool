@@ -26,3 +26,9 @@ IPQualityScore: https://www.ipqualityscore.com/user/api-keys (Optional)
 
 Re-run this again and this will provide results for the provided IP/Hash/Domain.
 
+Interactive mode:
+
+- Run: `python OSINT_Toolkit.py` (or `python OSINT_Toolkit.py --interactive`)
+- Then type an IP/Hash/Domain at the `Indicator>` prompt (type `q` to quit)
+- Optional: save each result to JSON by specifying an output directory: `python OSINT_Toolkit.py --interactive --output results/`
+
