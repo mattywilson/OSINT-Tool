@@ -35,7 +35,7 @@ cd C:\Tools\OSINT-Tool
 4. Navigate to: cd C:\Tools\OSINT-Tool
 ```
 
-**💡 Pro Tip**: Using `C:\Tools\OSINT-Tool` avoids path space issues and works universally across all Windows systems.
+Using `C:\Tools\OSINT-Tool` avoids path space issues and works universally across all Windows systems.
 
 ### 2. Install Dependencies
 ```bash
