@@ -29,10 +29,10 @@ git clone https://github.com/mattywilson/OSINT-Tool.git C:\Tools\OSINT-Tool
 cd C:\Tools\OSINT-Tool
 
 # Option 2: Download ZIP (also supports auto-updates)
-# 1. Download from: https://github.com/mattywilson/OSINT-Tool/archive/refs/heads/main.zip
-# 2. Create directory: mkdir C:\Tools
-# 3. Extract ZIP to: C:\Tools\OSINT-Tool
-# 4. Navigate to: cd C:\Tools\OSINT-Tool
+1. Download from: https://github.com/mattywilson/OSINT-Tool/archive/refs/heads/main.zip
+2. Create directory: mkdir C:\Tools
+3. Extract ZIP to: C:\Tools\OSINT-Tool
+4. Navigate to: cd C:\Tools\OSINT-Tool
 ```
 
 **💡 Pro Tip**: Using `C:\Tools\OSINT-Tool` avoids path space issues and works universally across all Windows systems.
