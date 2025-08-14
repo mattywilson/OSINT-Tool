@@ -1,6 +1,6 @@
 # SOC OSINT Threat Intelligence Tool
 
-A comprehensive command-line threat intelligence aggregator that queries multiple security APIs to provide actionable intelligence for SOC analysts and security researchers.
+A command-line threat intelligence tool that queries multiple OSINT APIs to provide a simple output for quick investigation.
 
 ## 🚀 Features
 
