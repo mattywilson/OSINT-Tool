@@ -21,7 +21,7 @@ import zipfile
 from urllib.parse import urlparse
 
 # Tool version - update this when releasing new versions
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.0.1"
 GITHUB_REPO = "mattywilson/OSINT-Tool"
 GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -946,3 +946,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
