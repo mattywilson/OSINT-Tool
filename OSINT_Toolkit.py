@@ -16,6 +16,14 @@ import re
 import os
 import subprocess
 import shutil
+import tempfile
+import zipfile
+from urllib.parse import urlparse
+
+# Tool version - update this when releasing new versions
+TOOL_VERSION = "1.0.0"
+GITHUB_REPO = "mattywilson/OSINT-Tool"
+GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 
 class ThreatIntelAggregator:
     def __init__(self, config_file: str = "config.json"):
@@ -541,21 +549,169 @@ def _run_git_command(args: list, cwd: str) -> str:
         raise RuntimeError(completed.stderr.strip() or f"git {' '.join(args)} failed")
     return completed.stdout.strip()
 
+def get_version_info():
+    """Get current version information from various sources"""
+    version_info = {
+        "current_version": TOOL_VERSION,
+        "source": "unknown",
+        "commit_sha": None
+    }
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Try to get version from git if available
+    try:
+        if shutil.which("git") and os.path.isdir(os.path.join(script_dir, ".git")):
+            commit_sha = _run_git_command(["rev-parse", "HEAD"], cwd=script_dir)[:7]
+            version_info["commit_sha"] = commit_sha
+            version_info["source"] = "git"
+    except Exception:
+        pass
+    
+    # Try to get version from local version file
+    version_file = os.path.join(script_dir, ".version")
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r') as f:
+                data = json.load(f)
+                if version_info["source"] == "unknown":
+                    version_info["source"] = "downloaded"
+                    version_info["commit_sha"] = data.get("commit_sha", "unknown")[:7]
+        except Exception:
+            pass
+    
+    return version_info
 
-def maybe_auto_update(disable_update: bool = False):
-    """If in a git repo and remote has newer commits, auto-pull and restart the script.
-    Skips if disabled or already updated once in this process.
-    """
-    if disable_update or os.environ.get("OSINT_TOOLKIT_UPDATED") == "1":
-        return
+def check_github_version():
+    """Check latest version from GitHub without updating"""
+    try:
+        # Check latest commit on main branch
+        api_url = f"{GITHUB_API_BASE}/commits/main"
+        response = requests.get(api_url, timeout=10)
+        
+        if response.status_code == 200:
+            commit_data = response.json()
+            latest_sha = commit_data["sha"]
+            commit_date = commit_data["commit"]["committer"]["date"]
+            
+            return {
+                "available": True,
+                "latest_sha": latest_sha,
+                "commit_date": commit_date,
+                "short_sha": latest_sha[:7]
+            }
+        else:
+            return {"available": False, "error": f"API returned {response.status_code}"}
+            
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+def download_and_update():
+    """Download latest version from GitHub and update current installation"""
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Download latest ZIP
+        download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip"
+        print("Downloading latest version...")
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, "update.zip")
+            
+            # Download ZIP file
+            response = requests.get(download_url, timeout=30)
+            response.raise_for_status()
+            
+            with open(zip_path, 'wb') as f:
+                f.write(response.content)
+            
+            # Extract ZIP
+            extract_dir = os.path.join(temp_dir, "extracted")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # Find the extracted folder (usually OSINT-Tool-main)
+            extracted_folders = [d for d in os.listdir(extract_dir) 
+                               if os.path.isdir(os.path.join(extract_dir, d))]
+            
+            if not extracted_folders:
+                raise Exception("No folders found in downloaded ZIP")
+            
+            source_dir = os.path.join(extract_dir, extracted_folders[0])
+            
+            # Get latest commit info for version tracking
+            github_info = check_github_version()
+            
+            # Backup current script
+            current_script = os.path.abspath(__file__)
+            backup_script = current_script + ".backup"
+            shutil.copy2(current_script, backup_script)
+            
+            try:
+                # Copy main script file
+                new_script = os.path.join(source_dir, "OSINT_Toolkit.py")
+                if os.path.exists(new_script):
+                    shutil.copy2(new_script, current_script)
+                else:
+                    # Try alternative names
+                    possible_names = ["osint_tool.py", "main.py", "tool.py"]
+                    found = False
+                    for name in possible_names:
+                        alt_script = os.path.join(source_dir, name)
+                        if os.path.exists(alt_script):
+                            shutil.copy2(alt_script, current_script)
+                            found = True
+                            break
+                    if not found:
+                        raise Exception("Could not find main script file in download")
+                
+                # Copy other important files (preserve config.json)
+                important_files = ["README.md", "requirements.txt", "LICENSE"]
+                for file_name in important_files:
+                    src_file = os.path.join(source_dir, file_name)
+                    dst_file = os.path.join(script_dir, file_name)
+                    if os.path.exists(src_file):
+                        shutil.copy2(src_file, dst_file)
+                
+                # Save version information
+                if github_info.get("available"):
+                    version_data = {
+                        "version": TOOL_VERSION,
+                        "commit_sha": github_info["latest_sha"],
+                        "update_date": datetime.now().isoformat(),
+                        "source": "github_download"
+                    }
+                    version_file = os.path.join(script_dir, ".version")
+                    with open(version_file, 'w') as f:
+                        json.dump(version_data, f, indent=2)
+                
+                # Remove backup on success
+                if os.path.exists(backup_script):
+                    os.remove(backup_script)
+                
+                return True
+                
+            except Exception as e:
+                # Restore backup on failure
+                if os.path.exists(backup_script):
+                    shutil.copy2(backup_script, current_script)
+                    os.remove(backup_script)
+                raise e
+                
+    except Exception as e:
+        print(f"Download update failed: {e}")
+        return False
+
+def git_auto_update(script_dir: str) -> bool:
+    """Original git-based auto-update functionality"""
     try:
         # Ensure git is available
         if not shutil.which("git"):
-            return
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+            return False
+            
         git_dir = os.path.join(script_dir, ".git")
         if not os.path.isdir(git_dir):
-            return
+            return False
 
         # Identify branch
         branch = _run_git_command(["rev-parse", "--abbrev-ref", "HEAD"], cwd=script_dir)
@@ -590,13 +746,83 @@ def maybe_auto_update(disable_update: bool = False):
                 # Fallback to hard reset if necessary
                 _run_git_command(["fetch", "origin", branch], cwd=script_dir)
                 _run_git_command(["reset", "--hard", f"origin/{branch}"], cwd=script_dir)
-            print("Update applied. Restarting with latest code...\n")
+            
+            print("Update applied via git. Restarting with latest code...\n")
+            return True
+            
+    except Exception as e:
+        print(f"Git update failed: {e}")
+        return False
+    
+    return False
+
+def maybe_auto_update(disable_update: bool = False):
+    """Hybrid auto-update: try git first, fallback to GitHub download"""
+    if disable_update or os.environ.get("OSINT_TOOLKIT_UPDATED") == "1":
+        return
+    
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        updated = False
+        
+        # Method 1: Try git update first (for developers/cloned repos)
+        if git_auto_update(script_dir):
+            updated = True
+        else:
+            # Method 2: Try GitHub API update (for downloaded versions)
+            current_version = get_version_info()
+            github_version = check_github_version()
+            
+            if github_version.get("available"):
+                current_sha = current_version.get("commit_sha", "unknown")
+                latest_sha = github_version.get("short_sha", "unknown")
+                
+                # Check if update is needed
+                if current_sha != "unknown" and latest_sha != "unknown" and current_sha != latest_sha:
+                    print(f"Update available: {current_sha} -> {latest_sha}")
+                    print("Downloading latest version from GitHub...")
+                    
+                    if download_and_update():
+                        print("Update applied via GitHub download. Restarting with latest code...\n")
+                        updated = True
+                    else:
+                        print("GitHub download update failed. Continuing with current version.")
+                elif current_sha == "unknown":
+                    # First run or no version info available
+                    print("Version check: saving current version info...")
+                    version_data = {
+                        "version": TOOL_VERSION,
+                        "commit_sha": github_version.get("latest_sha", "unknown"),
+                        "install_date": datetime.now().isoformat(),
+                        "source": "unknown"
+                    }
+                    version_file = os.path.join(script_dir, ".version")
+                    with open(version_file, 'w') as f:
+                        json.dump(version_data, f, indent=2)
+            else:
+                # Fallback: simple version check and notification
+                print("Unable to check for updates automatically.")
+                if not disable_update:
+                    print(f"Current version: {TOOL_VERSION}")
+                    print(f"Check for updates at: https://github.com/{GITHUB_REPO}")
+        
+        # Restart if updated
+        if updated:
             os.environ["OSINT_TOOLKIT_UPDATED"] = "1"
             os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+            
     except Exception as e:
         # Non-fatal; continue running
-        print(f"Update check failed or skipped: {e}")
+        print(f"Update check failed: {e}")
 
+def show_version_info():
+    """Display current version information"""
+    version_info = get_version_info()
+    print(f"SOC OSINT Tool v{version_info['current_version']}")
+    print(f"Source: {version_info['source']}")
+    if version_info['commit_sha']:
+        print(f"Commit: {version_info['commit_sha']}")
+    print(f"Repository: https://github.com/{GITHUB_REPO}")
 
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
@@ -605,8 +831,38 @@ def main():
     parser.add_argument('-c', '--config', default='config.json', help='Configuration file path')
     parser.add_argument('-i', '--interactive', action='store_true', help='Start in interactive mode')
     parser.add_argument('--no-update', action='store_true', help='Disable automatic update check at startup')
+    parser.add_argument('--version', action='store_true', help='Show version information and exit')
+    parser.add_argument('--check-update', action='store_true', help='Check for updates without applying them')
     
     args = parser.parse_args()
+
+    # Handle version display
+    if args.version:
+        show_version_info()
+        return
+
+    # Handle update check
+    if args.check_update:
+        current_version = get_version_info()
+        github_version = check_github_version()
+        
+        print(f"Current version: {current_version['current_version']}")
+        print(f"Current commit: {current_version.get('commit_sha', 'unknown')}")
+        print(f"Source: {current_version['source']}")
+        
+        if github_version.get("available"):
+            latest_sha = github_version.get("short_sha", "unknown")
+            current_sha = current_version.get("commit_sha", "unknown")
+            
+            if current_sha != latest_sha:
+                print(f"Latest commit: {latest_sha}")
+                print("Update available!")
+                print(f"Download from: https://github.com/{GITHUB_REPO}")
+            else:
+                print("You are running the latest version.")
+        else:
+            print(f"Unable to check for updates: {github_version.get('error', 'Unknown error')}")
+        return
 
     # Auto-update (non-fatal) before performing any work
     maybe_auto_update(disable_update=args.no_update)
@@ -616,7 +872,8 @@ def main():
     
     # Interactive mode if requested or no indicator supplied
     if args.interactive or not args.indicator:
-        print("\nInteractive mode. Enter an IP, domain, or file hash to analyse. Type 'q' to quit.")
+        print(f"\nSOC OSINT Tool v{TOOL_VERSION}")
+        print("Interactive mode. Enter an IP, domain, or file hash to analyse. Type 'q' to quit.")
         if args.output:
             # Ensure output is treated as a directory in interactive mode
             if not os.path.isdir(args.output):
@@ -634,6 +891,19 @@ def main():
                 continue
             if user_input.lower() in ('q', 'quit', 'exit'):
                 break
+            
+            # Handle special commands
+            if user_input.lower() in ('version', '--version'):
+                show_version_info()
+                continue
+                
+            if user_input.lower() in ('help', '--help', '?'):
+                print("\nCommands:")
+                print("  <indicator>  - Analyse IP, domain, or file hash")
+                print("  version      - Show version information")
+                print("  help         - Show this help")
+                print("  q, quit, exit - Quit the program")
+                continue
             
             # Analyse indicator
             results = aggregator.analyse_indicator(user_input)
