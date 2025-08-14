@@ -24,7 +24,7 @@ A comprehensive command-line threat intelligence aggregator that queries multipl
 
 ### 1. Clone or Download
 ```bash
-git clone <repository-url>
+git clone https://github.com/mattywilson/OSINT-Tool.git
 cd OSINT-Tool
 ```
 
