@@ -17,15 +17,21 @@ A comprehensive command-line threat intelligence aggregator that queries multipl
 
 - **Python 3.7+** - [Download from python.org](https://python.org)
   - ⚠️ **Important**: Tick "Add Python to Environment Variables" during installation
-- **Git** (optional) - For automatic updates
+- **Git** (optional) - Enhanced auto-updates for cloned repositories - [Download from git-scm.com](https://git-scm.com/)
 - **API Keys** - See [API Configuration](#-api-configuration) section
+- **⚠️ Path Requirement**: Install in a directory path **without spaces** (e.g., `OSINT-Tool`, not `OSINT Tool`)
 
 ## 🔧 Installation
 
 ### 1. Clone or Download
 ```bash
+# Option 1: Clone with Git (recommended for auto-updates)
 git clone https://github.com/mattywilson/OSINT-Tool.git
 cd OSINT-Tool
+
+# Option 2: Download ZIP (also supports auto-updates)
+# Download from: https://github.com/mattywilson/OSINT-Tool/archive/refs/heads/main.zip
+# Extract to a folder WITHOUT spaces in the path (e.g., OSINT-Tool, not "OSINT Tool")
 ```
 
 ### 2. Install Dependencies
@@ -68,13 +74,13 @@ Edit the generated `config.json` file with your API keys:
 
 ### Quick Analysis (Single Indicator)
 ```bash
-# Analyze an IP address
+# Analyse an IP address
 python OSINT_Toolkit.py 8.8.8.8
 
-# Analyze a domain
+# Analyse a domain
 python OSINT_Toolkit.py malicious-domain.com
 
-# Analyze a file hash
+# Analyse a file hash
 python OSINT_Toolkit.py 5d41402abc4b2a76b9719d911017c592
 
 # Save results to JSON
@@ -102,6 +108,12 @@ python OSINT_Toolkit.py 8.8.8.8 --config my_config.json
 
 # Disable automatic updates
 python OSINT_Toolkit.py 8.8.8.8 --no-update
+
+# Check current version
+python OSINT_Toolkit.py --version
+
+# Check for updates without applying them
+python OSINT_Toolkit.py --check-update
 
 # Get help
 python OSINT_Toolkit.py --help
@@ -148,6 +160,15 @@ The tool provides automated risk scoring:
 
 ### Common Issues
 
+**"Path-related errors during update"**
+```bash
+# Problem: Directory path contains spaces (e.g., "OSINT Tool")
+# Solution: Rename directory to remove spaces
+mv "OSINT Tool" "OSINT-Tool"
+cd OSINT-Tool
+python OSINT_Toolkit.py
+```
+
 **"Config file not found"**
 ```bash
 # Solution: Run once to generate template
@@ -170,14 +191,47 @@ python OSINT_Toolkit.py 8.8.8.8
 ### Rate Limiting
 - Free API tiers have request limits
 - Tool includes 1-second delays between requests
-- Use `--no-update` to skip Git operations if needed
+- Use `--no-update` to skip update checks if needed
+- GitHub API has rate limits for version checking (60 requests/hour for unauthenticated users)
 
 ## 🔄 Auto-Updates
 
-The tool automatically checks for updates from the Git repository and restarts with the latest version. To disable:
+The tool features a **hybrid auto-update system** that works with both Git clones and ZIP downloads:
+
+### Update Methods
+- **Git Method** (preferred): For cloned repositories - uses `git pull`
+- **GitHub Download Method**: For ZIP downloads - downloads latest version from GitHub API
+- **Automatic Detection**: Tool automatically chooses the best method
+
+### Requirements for Auto-Updates
+- Internet connection
+- **Path without spaces** (e.g., `C:\OSINT-Tool\`, not `C:\OSINT Tool\`)
+- For Git method: Git installed and repository cloned
+- For GitHub method: None (works with simple ZIP download)
+
+### Update Commands
 ```bash
+# Check current version and commit
+python OSINT_Toolkit.py --version
+
+# Check for updates without applying
+python OSINT_Toolkit.py --check-update
+
+# Disable auto-update for single run
 python OSINT_Toolkit.py --no-update <indicator>
+
+# Manual update (Git users)
+git pull origin main
 ```
+
+### Interactive Mode Commands
+```
+Indicator> version    # Show version information
+Indicator> help       # Show available commands
+Indicator> quit       # Exit the program
+```
+
+**🚨 Important**: If you get path-related errors during auto-update, ensure your installation directory contains **no spaces** in the path.
 
 ## 📁 File Structure
 
@@ -185,6 +239,7 @@ python OSINT_Toolkit.py --no-update <indicator>
 OSINT-Tool/
 ├── OSINT_Toolkit.py    # Main application
 ├── config.json         # API configuration (generated)
+├── .version           # Version tracking (auto-generated)
 ├── README.md          # This file
 └── results/           # Output directory (optional)
 ```
@@ -197,10 +252,10 @@ OSINT-Tool/
 
 ## ⚖️ Legal Notice
 
-This tool is for authorized security research and SOC operations only. Users are responsible for:
+This tool is for authorised security research and SOC operations only. Users are responsible for:
 - Complying with API terms of service
 - Following applicable laws and regulations  
-- Obtaining proper authorization before analyzing systems
+- Obtaining proper authorisation before analysing systems
 - Respecting rate limits and usage policies
 
 ## 📞 Support
