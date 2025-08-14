@@ -243,28 +243,3 @@ OSINT-Tool/
 ├── README.md          # This file
 └── results/           # Output directory (optional)
 ```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
-
-## ⚖️ Legal Notice
-
-This tool is for authorised security research and SOC operations only. Users are responsible for:
-- Complying with API terms of service
-- Following applicable laws and regulations  
-- Obtaining proper authorisation before analysing systems
-- Respecting rate limits and usage policies
-
-## 📞 Support
-
-For issues or questions:
-- Check the troubleshooting section above
-- Review API provider documentation
-- Ensure all dependencies are properly installed
-
----
-
-**Made for SOC analysts, by SOC analysts** 🛡️
