@@ -19,20 +19,23 @@ A comprehensive command-line threat intelligence aggregator that queries multipl
   - ⚠️ **Important**: Tick "Add Python to Environment Variables" during installation
 - **Git** (optional) - Enhanced auto-updates for cloned repositories - [Download from git-scm.com](https://git-scm.com/)
 - **API Keys** - See [API Configuration](#-api-configuration) section
-- **⚠️ Path Requirement**: Install in a directory path **without spaces** (e.g., `OSINT-Tool`, not `OSINT Tool`)
 
 ## 🔧 Installation
 
 ### 1. Clone or Download
 ```bash
 # Option 1: Clone with Git (recommended for auto-updates)
-git clone https://github.com/mattywilson/OSINT-Tool.git
-cd OSINT-Tool
+git clone https://github.com/mattywilson/OSINT-Tool.git C:\Tools\OSINT-Tool
+cd C:\Tools\OSINT-Tool
 
 # Option 2: Download ZIP (also supports auto-updates)
-# Download from: https://github.com/mattywilson/OSINT-Tool/archive/refs/heads/main.zip
-# Extract to a folder WITHOUT spaces in the path (e.g., OSINT-Tool, not "OSINT Tool")
+# 1. Download from: https://github.com/mattywilson/OSINT-Tool/archive/refs/heads/main.zip
+# 2. Create directory: mkdir C:\Tools
+# 3. Extract ZIP to: C:\Tools\OSINT-Tool
+# 4. Navigate to: cd C:\Tools\OSINT-Tool
 ```
+
+**💡 Pro Tip**: Using `C:\Tools\OSINT-Tool` avoids path space issues and works universally across all Windows systems.
 
 ### 2. Install Dependencies
 ```bash
@@ -162,10 +165,11 @@ The tool provides automated risk scoring:
 
 **"Path-related errors during update"**
 ```bash
-# Problem: Directory path contains spaces (e.g., "OSINT Tool")
-# Solution: Rename directory to remove spaces
-mv "OSINT Tool" "OSINT-Tool"
-cd OSINT-Tool
+# Problem: Complex user paths or OneDrive folders
+# Solution: Move to standard tools directory
+mkdir C:\Tools
+move "current-folder" C:\Tools\OSINT-Tool
+cd C:\Tools\OSINT-Tool
 python OSINT_Toolkit.py
 ```
 
@@ -205,9 +209,10 @@ The tool features a **hybrid auto-update system** that works with both Git clone
 
 ### Requirements for Auto-Updates
 - Internet connection
-- **Path without spaces** (e.g., `C:\OSINT-Tool\`, not `C:\OSINT Tool\`)
 - For Git method: Git installed and repository cloned
 - For GitHub method: None (works with simple ZIP download)
+
+**💡 Recommended**: Install to `C:\Tools\OSINT-Tool` for optimal compatibility
 
 ### Update Commands
 ```bash
@@ -231,7 +236,7 @@ Indicator> help       # Show available commands
 Indicator> quit       # Exit the program
 ```
 
-**🚨 Important**: If you get path-related errors during auto-update, ensure your installation directory contains **no spaces** in the path.
+**🚨 Important**: If you get path-related errors during auto-update, move the tool to a standard directory like `C:\Tools\OSINT-Tool`.
 
 ## 📁 File Structure
 
