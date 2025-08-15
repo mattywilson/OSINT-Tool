@@ -21,7 +21,7 @@ import zipfile
 from urllib.parse import urlparse
 
 # Tool version - update this when releasing new versions
-TOOL_VERSION = "1.0.1"
+TOOL_VERSION = "1.0.2"
 GITHUB_REPO = "mattywilson/OSINT-Tool"
 GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -610,6 +610,7 @@ def download_and_update():
     """Download latest version from GitHub and update current installation"""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
+        current_script = os.path.abspath(__file__)
         
         # Download latest ZIP
         download_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip"
@@ -642,16 +643,14 @@ def download_and_update():
             # Get latest commit info for version tracking
             github_info = check_github_version()
             
-            # Backup current script
-            current_script = os.path.abspath(__file__)
-            backup_script = current_script + ".backup"
-            shutil.copy2(current_script, backup_script)
+            # Create a temporary updated script instead of overwriting current one
+            temp_script = current_script + ".new"
             
             try:
-                # Copy main script file
+                # Copy main script file to temporary location
                 new_script = os.path.join(source_dir, "OSINT_Toolkit.py")
                 if os.path.exists(new_script):
-                    shutil.copy2(new_script, current_script)
+                    shutil.copy2(new_script, temp_script)
                 else:
                     # Try alternative names
                     possible_names = ["osint_tool.py", "main.py", "tool.py"]
@@ -659,7 +658,7 @@ def download_and_update():
                     for name in possible_names:
                         alt_script = os.path.join(source_dir, name)
                         if os.path.exists(alt_script):
-                            shutil.copy2(alt_script, current_script)
+                            shutil.copy2(alt_script, temp_script)
                             found = True
                             break
                     if not found:
@@ -685,22 +684,19 @@ def download_and_update():
                     with open(version_file, 'w') as f:
                         json.dump(version_data, f, indent=2)
                 
-                # Remove backup on success
-                if os.path.exists(backup_script):
-                    os.remove(backup_script)
-                
-                return True
+                # Return the path to the new script for delayed replacement
+                return temp_script
                 
             except Exception as e:
-                # Restore backup on failure
-                if os.path.exists(backup_script):
-                    shutil.copy2(backup_script, current_script)
-                    os.remove(backup_script)
+                # Clean up temporary file on error
+                if os.path.exists(temp_script):
+                    os.remove(temp_script)
                 raise e
                 
     except Exception as e:
         print(f"Download update failed: {e}")
-        return False
+        return None
+
 
 def git_auto_update(script_dir: str) -> bool:
     """Original git-based auto-update functionality"""
@@ -756,18 +752,18 @@ def git_auto_update(script_dir: str) -> bool:
     
     return False
 
+
 def maybe_auto_update(disable_update: bool = False):
     """Hybrid auto-update: try git first, fallback to GitHub download"""
     if disable_update or os.environ.get("OSINT_TOOLKIT_UPDATED") == "1":
-        return
+        return False
     
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        updated = False
         
         # Method 1: Try git update first (for developers/cloned repos)
         if git_auto_update(script_dir):
-            updated = True
+            return True
         else:
             # Method 2: Try GitHub API update (for downloaded versions)
             current_version = get_version_info()
@@ -782,9 +778,22 @@ def maybe_auto_update(disable_update: bool = False):
                     print(f"Update available: {current_sha} -> {latest_sha}")
                     print("Downloading latest version from GitHub...")
                     
-                    if download_and_update():
-                        print("Update applied via GitHub download. Restarting with latest code...\n")
-                        updated = True
+                    temp_script = download_and_update()
+                    if temp_script:
+                        print("Update downloaded successfully.")
+                        print("The updated version will be applied when you restart the tool.")
+                        print("To apply the update now, please exit and run the tool again.\n")
+                        
+                        # Create a simple update script that will replace the current script on next run
+                        update_flag_file = os.path.join(script_dir, ".pending_update")
+                        with open(update_flag_file, 'w') as f:
+                            json.dump({
+                                "temp_script": temp_script,
+                                "current_script": os.path.abspath(__file__),
+                                "update_time": datetime.now().isoformat()
+                            }, f)
+                        
+                        return False  # Don't restart automatically
                     else:
                         print("GitHub download update failed. Continuing with current version.")
                 elif current_sha == "unknown":
@@ -806,14 +815,72 @@ def maybe_auto_update(disable_update: bool = False):
                     print(f"Current version: {TOOL_VERSION}")
                     print(f"Check for updates at: https://github.com/{GITHUB_REPO}")
         
-        # Restart if updated
-        if updated:
-            os.environ["OSINT_TOOLKIT_UPDATED"] = "1"
-            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+        return False
             
     except Exception as e:
         # Non-fatal; continue running
         print(f"Update check failed: {e}")
+        return False
+
+
+def apply_pending_update():
+    """Apply any pending updates that were downloaded previously"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    update_flag_file = os.path.join(script_dir, ".pending_update")
+    
+    if not os.path.exists(update_flag_file):
+        return False
+    
+    try:
+        with open(update_flag_file, 'r') as f:
+            update_info = json.load(f)
+        
+        temp_script = update_info.get("temp_script")
+        current_script = update_info.get("current_script")
+        
+        if temp_script and current_script and os.path.exists(temp_script):
+            # Create backup
+            backup_script = current_script + ".backup"
+            shutil.copy2(current_script, backup_script)
+            
+            try:
+                # Replace current script with updated version
+                shutil.move(temp_script, current_script)
+                
+                # Make sure it's executable
+                os.chmod(current_script, 0o755)
+                
+                # Clean up
+                os.remove(update_flag_file)
+                if os.path.exists(backup_script):
+                    os.remove(backup_script)
+                
+                print("Update applied successfully!")
+                return True
+                
+            except Exception as e:
+                # Restore backup on failure
+                if os.path.exists(backup_script):
+                    shutil.copy2(backup_script, current_script)
+                    os.remove(backup_script)
+                raise e
+        else:
+            # Clean up invalid update info
+            os.remove(update_flag_file)
+            if temp_script and os.path.exists(temp_script):
+                os.remove(temp_script)
+    
+    except Exception as e:
+        print(f"Failed to apply pending update: {e}")
+        # Clean up on error
+        try:
+            if os.path.exists(update_flag_file):
+                os.remove(update_flag_file)
+        except:
+            pass
+    
+    return False
+
 
 def show_version_info():
     """Display current version information"""
@@ -823,6 +890,7 @@ def show_version_info():
     if version_info['commit_sha']:
         print(f"Commit: {version_info['commit_sha']}")
     print(f"Repository: https://github.com/{GITHUB_REPO}")
+
 
 def main():
     parser = argparse.ArgumentParser(description='SOC Threat Intelligence Aggregator')
@@ -864,7 +932,14 @@ def main():
             print(f"Unable to check for updates: {github_version.get('error', 'Unknown error')}")
         return
 
-    # Auto-update (non-fatal) before performing any work
+    # Apply any pending updates first
+    if apply_pending_update():
+        print("Restarting with updated version...\n")
+        # Clean restart without environment pollution
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+        return
+
+    # Auto-update check (non-fatal, non-restarting)
     maybe_auto_update(disable_update=args.no_update)
     
     # Initialise aggregator
@@ -944,6 +1019,6 @@ def main():
             json.dump(results, f, indent=2)
         print(f"\nResults saved to {args.output}")
 
+
 if __name__ == "__main__":
     main()
-
